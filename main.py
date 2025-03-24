@@ -1,5 +1,6 @@
 import os
 import logging
+import random
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 import tensorflow as tf
@@ -7,43 +8,29 @@ import numpy as np
 from aiogram import F
 from PIL import Image
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("bot.log"),
-        logging.StreamHandler()
-    ]
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Параметры модели
 img_height, img_width = 224, 224
+model = tf.keras.models.load_model('dog_breed_model.h5', compile=False)
 
-# Загрузка модели
-logger.info("Загрузка модели TensorFlow...")
-try:
-    model = tf.keras.models.load_model('dog_breed_model.h5', compile=False)
-    logger.info(f"Модель успешно загружена, количество классов: {model.output_shape[-1]}")
-except Exception as e:
-    logger.error(f"Ошибка при загрузке модели: {str(e)}")
-    raise
-
-# Инициализация бота
 BOT_TOKEN = '7492687067:AAFnC2mq19MekQlfrwnL6XmKulE8oqHeV3I'
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Список классов с русскоязычными названиями и справками
+# Словарь для хранения языка пользователя
+user_lang = {}
+
+# Переводы названий пород и описаний
 class_indices = {
+    "ru":{
     0: ("Чихуахуа", "Мексиканская порода, названная в честь штата Чиуауа, известна своим маленьким размером и живым характером."),
     1: ("Японский спаниель", "Древняя японская порода, выведенная для陪伴 императорских семей, отличается элегантностью и дружелюбием."),
     2: ("Мальтийская болонка", "Маленькая декоративная собака с острова Мальта, славится своей белоснежной шерстью и ласковым нравом."),
     3: ("Пекинес", "Китайская порода, бывшая любимцем императоров, характеризуется гордым видом и густой гривой."),
     4: ("Ши-тцу", "Тибетская порода, название которой переводится как 'маленький лев', известна своим спокойным и дружелюбным характером."),
     5: ("Бленхеймский спаниель", "Разновидность английского кокер-спаниеля с красно-белой шерстью, популярная среди аристократов."),
-    6: ("Папильон", "Французская порода, названная за уши, похожие на крылья бабочки (papillon), отличается умом и энергичностью."),
+    6: ("Папильон", "Французская порода, названная за уши, похожие на крылья бабочки, отличается умом и энергичностью."),
     7: ("Той-терьер", "Миниатюрная порода из Англии, выведенная для охоты на крыс, теперь популярна как компаньон."),
     8: ("Родезийский риджбек", "Южноафриканская порода, известная гребнем на спине, выведена для охоты на львов."),
     9: ("Афганская борзая", "Древняя порода из Афганистана, славится длинной шелковистой шерстью и грацией."),
@@ -157,28 +144,427 @@ class_indices = {
     117: ("Динго", "Австралийская дикая собака, не одомашненная, но иногда встречается как питомец."),
     118: ("Дхоле", "Азиатская дикая собака, обитает в стаях, известна красноватой шерстью."),
     119: ("Африканская охотничья собака", "Африканская дикая порода, известна пятнистым окрасом и стайной охотой.")
+    },
+    "en": {
+    0: ("Chihuahua", "A Mexican breed named after the Chihuahua state, known for its small size and lively character."),
+    1: ("Japanese Chin", "An ancient Japanese breed bred for imperial families, noted for its elegance and friendliness."),
+    2: ("Maltese", "A small decorative dog from Malta, famous for its snow-white coat and gentle nature."),
+    3: ("Pekingese", "A Chinese breed favored by emperors, characterized by a proud demeanor and thick mane."),
+    4: ("Shih Tzu", "A Tibetan breed meaning 'little lion,' known for its calm and friendly personality."),
+    5: ("Blenheim Spaniel", "A variety of English Cocker Spaniel with red-and-white fur, popular among aristocrats."),
+    6: ("Papillon", "A French breed named for its butterfly-like ears, known for intelligence and energy."),
+    7: ("Toy Terrier", "A miniature English breed bred for rat hunting, now popular as a companion."),
+    8: ("Rhodesian Ridgeback", "A South African breed with a ridge on its back, bred for lion hunting."),
+    9: ("Afghan Hound", "An ancient Afghan breed, famous for its long silky coat and grace."),
+    10: ("Basset Hound", "An English hound with short legs and long ears, known for its sense of smell and calm demeanor."),
+    11: ("Beagle", "An English breed bred for hare hunting, noted for its friendliness and energy."),
+    12: ("Bloodhound", "A Belgian breed with exceptional scenting ability, used for tracking people and animals."),
+    13: ("Bluetick Coonhound", "An American hound known for its blue-ticked coat and melodious bark."),
+    14: ("Black and Tan Coonhound", "An American breed bred for raccoon hunting, known for its endurance."),
+    15: ("Treeing Walker Coonhound", "An American breed named after Thomas Walker, famed for its speed and hunting instinct."),
+    16: ("English Foxhound", "An English breed bred for fox hunting, known for its stamina and friendly nature."),
+    17: ("Redbone Coonhound", "An American hound with a reddish coat, used for hunting large game."),
+    18: ("Borzoi", "A Russian breed bred for wolf hunting, renowned for its speed and elegance."),
+    19: ("Irish Wolfhound", "One of the largest breeds, bred in Ireland for wolf hunting, known for its kindness."),
+    20: ("Italian Greyhound", "A miniature greyhound from Italy, graceful and affectionate, ideal as a companion."),
+    21: ("Whippet", "An English breed combining greyhound speed with compactness, used in dog racing."),
+    22: ("Ibizan Hound", "A Spanish breed from Ibiza, bred for rabbit hunting, noted for its grace."),
+    23: ("Norwegian Elkhound", "A Norwegian breed bred for elk hunting, known for its bravery and thick coat."),
+    24: ("Otterhound", "An English breed bred for otter hunting, famous for its unique sense of smell."),
+    25: ("Saluki", "An ancient Middle Eastern greyhound, known as the 'royal dog of Egypt,' famed for its speed."),
+    26: ("Scottish Deerhound", "A Scottish breed bred for deer hunting, characterized by a powerful build."),
+    27: ("Weimaraner", "A German hunting breed, known for its silver coat and versatile skills."),
+    28: ("Staffordshire Bull Terrier", "An English breed bred for fighting, now valued for loyalty and strength."),
+    29: ("American Staffordshire Terrier", "An American breed derived from bull terriers, known for its muscularity."),
+    30: ("Bedlington Terrier", "An English breed resembling a lamb, bred for hunting small game."),
+    31: ("Border Terrier", "A Scottish breed bred for fox hunting, famed for its endurance and friendliness."),
+    32: ("Kerry Blue Terrier", "An Irish breed with a bluish coat, used as a hunter and companion."),
+    33: ("Irish Terrier", "An Irish breed known as the 'red devil,' noted for its courage and energy."),
+    34: ("Norfolk Terrier", "An English breed bred for rat hunting, small and friendly."),
+    35: ("Norwich Terrier", "An English breed similar to the Norfolk Terrier but with upright ears."),
+    36: ("Yorkshire Terrier", "An English decorative breed bred for rat catching, now popular as a companion."),
+    37: ("Wire Fox Terrier", "An English breed bred for fox hunting, known for its energy."),
+    38: ("Lakeland Terrier", "An English breed from the Lake District, bred for pest hunting."),
+    39: ("Sealyham Terrier", "A Welsh breed bred for badger hunting, famous for its white coat."),
+    40: ("Airedale Terrier", "An English breed known as the 'king of terriers,' versatile and intelligent."),
+    41: ("Cairn Terrier", "A Scottish breed bred for hunting in stone piles, noted for its bravery."),
+    42: ("Australian Terrier", "An Australian breed bred for rodent control, energetic and loyal."),
+    43: ("Dandie Dinmont Terrier", "A Scottish breed named after a novel character, known for its long body."),
+    44: ("Boston Terrier", "An American breed bred as a companion, noted for its intelligence."),
+    45: ("Miniature Schnauzer", "A German breed bred for guarding, known for its bearded face."),
+    46: ("Giant Schnauzer", "A German breed, originally a herder, now used as a working dog."),
+    47: ("Standard Schnauzer", "A German medium-sized breed bred for guarding and hunting."),
+    48: ("Scottish Terrier", "A Scottish breed known as 'Scottie,' famed for its independent nature."),
+    49: ("Tibetan Terrier", "A Tibetan breed, despite the name, not a terrier but a herding dog."),
+    50: ("Silky Terrier", "An Australian breed bred as a companion, with a silky coat."),
+    51: ("Soft Coated Wheaten Terrier", "An Irish breed known for its soft coat and friendly nature."),
+    52: ("West Highland White Terrier", "A Scottish breed bred for hunting, popular for its white coat."),
+    53: ("Lhasa Apso", "A Tibetan breed used as a monastery watchdog, known for its long coat."),
+    54: ("Flat-Coated Retriever", "An English breed bred for retrieving game, famed for its loyalty."),
+    55: ("Curly-Coated Retriever", "An English breed with a curly coat, used for water hunting."),
+    56: ("Golden Retriever", "A Scottish breed bred for hunting, known for its friendliness and intelligence."),
+    57: ("Labrador Retriever", "A Canadian breed popular as a service dog and companion."),
+    58: ("Chesapeake Bay Retriever", "An American breed bred for duck hunting, loves water."),
+    59: ("German Shorthaired Pointer", "A German hunting breed, versatile and energetic."),
+    60: ("Vizsla", "A Hungarian breed bred for hunting, known for its elegance and loyalty."),
+    61: ("English Setter", "An English breed bred for bird hunting, famed for its grace."),
+    62: ("Irish Setter", "An Irish breed with a red coat, known for its energy and hunting skills."),
+    63: ("Gordon Setter", "A Scottish breed bred for hunting, noted for its black-and-tan coat."),
+    64: ("Brittany", "A French breed bred for hunting, compact and energetic."),
+    65: ("Clumber Spaniel", "An English breed bred for hunting, known for its massive build."),
+    66: ("English Springer Spaniel", "An English breed bred for bird hunting, active and smart."),
+    67: ("Welsh Springer Spaniel", "A Welsh breed bred for hunting, noted for its red-and-white coat."),
+    68: ("Cocker Spaniel", "An English breed popular as a companion, known for its long ears."),
+    69: ("Sussex Spaniel", "An English breed bred for hunting, famed for its golden coat."),
+    70: ("Irish Water Spaniel", "An Irish breed bred for water hunting, with a curly coat."),
+    71: ("Kuvasz", "A Hungarian breed, a herding dog, known for its white coat and protective nature."),
+    72: ("Schipperke", "A Belgian breed bred for barge guarding, small and energetic."),
+    73: ("Groenendael", "A Belgian shepherd with a black coat, known as a working dog."),
+    74: ("Malinois", "A Belgian shepherd popular in police and military, noted for its intelligence and strength."),
+    75: ("Briard", "A French herding breed, known for its long coat and loyalty."),
+    76: ("Kelpie", "An Australian breed bred for sheep work, famed for its endurance."),
+    77: ("Komondor", "A Hungarian breed with corded fur, used for livestock guarding."),
+    78: ("Old English Sheepdog", "An English breed bred for herding, known for its thick coat."),
+    79: ("Shetland Sheepdog", "A Scottish breed, a miniature collie, smart and active."),
+    80: ("Collie", "A Scottish herding breed, known for its long coat and intelligence."),
+    81: ("Border Collie", "A Scottish breed, the best herding dog, famed for its intelligence and energy."),
+    82: ("Bouvier des Flandres", "A Belgian breed bred for farm work, strong and hardy."),
+    83: ("Rottweiler", "A German breed, originally a herder, now popular as a guard dog."),
+    84: ("German Shepherd", "A German breed, a versatile working dog, known for its intelligence and strength."),
+    85: ("Doberman Pinscher", "A German breed bred as a guard dog, noted for its elegance and loyalty."),
+    86: ("Miniature Pinscher", "A German breed resembling a small Doberman, energetic and bold."),
+    87: ("Greater Swiss Mountain Dog", "A Swiss breed bred for mountain work, strong and calm."),
+    88: ("Bernese Mountain Dog", "A Swiss herding breed, known for its tricolor coat."),
+    89: ("Appenzeller Sennenhund", "A Swiss breed bred for herding, active and hardy."),
+    90: ("Entlebucher Sennenhund", "A Swiss breed, the smallest of the Sennenhunds, energetic and loyal."),
+    91: ("Boxer", "A German breed bred for guarding, famed for its muscularity and friendliness."),
+    92: ("Bullmastiff", "An English breed bred for guarding, powerful and calm."),
+    93: ("Tibetan Mastiff", "A Tibetan breed, an ancient monastery guard, known for its thick coat."),
+    94: ("French Bulldog", "A French breed bred as a companion, famous for its short snout."),
+    95: ("Great Dane", "A German breed, one of the largest, known as a 'gentle giant.'"),
+    96: ("Saint Bernard", "A Swiss breed bred for Alpine rescue, massive and good-natured."),
+    97: ("Canadian Eskimo Dog", "A Canadian breed bred for hauling in the Arctic, strong and hardy."),
+    98: ("Alaskan Malamute", "An Alaskan breed bred for sled pulling, known for its thick coat and strength."),
+    99: ("Siberian Husky", "A Siberian breed bred by the Chukchi for sleds, famed for its endurance and blue eyes."),
+    100: ("Affenpinscher", "A German breed bred for rat catching, small with a 'monkey-like' face."),
+    101: ("Basenji", "An African breed known as the 'barkless dog,' graceful and smart."),
+    102: ("Pug", "A Chinese breed bred as a companion, famous for its short snout and cheerful nature."),
+    103: ("Leonberger", "A German breed bred as a family dog, large and calm."),
+    104: ("Newfoundland", "A Canadian breed bred for water rescue, known for its kindness and thick coat."),
+    105: ("Great Pyrenees", "A French breed bred for livestock guarding in mountains, white and powerful."),
+    106: ("Samoyed", "A Siberian breed bred by the Samoyede for reindeer herding, known for its white coat."),
+    107: ("Pomeranian", "A German breed, a miniature spitz, popular as a decorative dog."),
+    108: ("Chow Chow", "A Chinese breed, an ancient guard dog, known for its blue tongue and thick coat."),
+    109: ("Keeshond", "A Dutch breed bred for barge guarding, famed for its fluffy coat."),
+    110: ("Petit Brabançon", "A Belgian breed bred for rat catching, small with a bearded face."),
+    111: ("Pembroke Welsh Corgi", "A Welsh breed bred for herding, known for its short legs."),
+    112: ("Cardigan Welsh Corgi", "A Welsh breed, older than the Pembroke, noted for its long tail."),
+    113: ("Toy Poodle", "A French breed, the smallest poodle variety, smart and elegant."),
+    114: ("Miniature Poodle", "A French breed, a medium-sized poodle, known for its curly coat."),
+    115: ("Standard Poodle", "A French breed bred for duck hunting, intelligent and active."),
+    116: ("Mexican Hairless Dog", "A Mexican breed known for its lack of fur, ancient and rare."),
+    117: ("Dingo", "An Australian wild dog, not domesticated, but sometimes kept as a pet."),
+    118: ("Dhole", "An Asian wild dog living in packs, known for its reddish coat."),
+    119: ("African Wild Dog", "An African wild breed, famous for its spotted coat and pack hunting.")
+    }
 }
 
-async def predict_breed(img_path):
+# Переводы образовательного контента
+breed_tips = {
+    "ru": {
+    0: ["Чихуахуа — самая маленькая порода в мире.", "Им нужна тёплая одежда зимой.", "Они очень преданы своему хозяину."],
+    1: ["Японский спаниель был подарком императоров.", "Их шерсть требует ежедневного ухода.", "Они любят сидеть на возвышениях."],
+    2: ["Мальтийская болонка не линяет, что удобно для аллергиков.", "Их белая шерсть требует частого мытья.", "Они обожают ласку и внимание."],
+    3: ["Пекинесы считались священными в Китае.", "Их морда требует особого ухода.", "Они предпочитают спокойный образ жизни."],
+    4: ["Ши-тцу отлично ладят с детьми.", "Их шерсть нужно регулярно стричь.", "Они редко проявляют агрессию."],
+    5: ["Бленхеймский спаниель назван в честь дворца.", "Они любят долгие прогулки.", "Хорошо уживаются с кошками."],
+    6: ["Папильоны очень умны для своего размера.", "Их уши нужно чистить регулярно.", "Они обожают активные игры."],
+    7: ["Той-терьеры были крысоловами в Англии.", "Им нужен тёплый дом зимой.", "Они привязаны к одному хозяину."],
+    8: ["Родезийский риджбек охотился на львов.", "Их гребень уникален для каждой собаки.", "Они требуют строгого воспитания."],
+    9: ["Афганская борзая — древняя порода.", "Их шерсть требует профессионального ухода.", "Они любят бегать на просторе."],
+    10: ["Бассет-хаунды имеют лучший нюх среди собак.", "Их уши нужно чистить регулярно.", "Они любят лениться дома."],
+    11: ["Бигли были охотниками на зайцев.", "Они обожают копать ямы.", "Их дружелюбие делает их отличными компаньонами."],
+    12: ["Бладхаунды могут идти по следу сутками.", "Их кожа требует ухода из-за складок.", "Они спокойны и уравновешены."],
+    13: ["Блутек издают мелодичный лай.", "Они любят охоту в лесу.", "Их шерсть легко чистится."],
+    14: ["Чёрно-подпалая гончая вынослива в лесу.", "Они хорошо работают в стае.", "Их нужно много выгуливать."],
+    15: ["Уокерская гончая — быстрая охотница.", "Они любят долгие прогулки.", "Им нужен простор для бега."],
+    16: ["Английский фоксхаунд вынослив на охоте.", "Они дружелюбны к людям.", "Их голос громкий и звучный."],
+    17: ["Редбон имеет яркий красный окрас.", "Они отличные охотники на дичь.", "Им нужна активная жизнь."],
+    18: ["Борзая может догнать волка.", "Они элегантны и грациозны.", "Их шерсть короткая и проста в уходе."],
+    19: ["Ирландский волкодав — добрый гигант.", "Они хорошо ладят с детьми.", "Им нужен простор для жизни."],
+    20: ["Итальянская борзая миниатюрна и изящна.", "Они любят тепло и уют.", "Их легко дрессировать."],
+    21: ["Уиппеты — чемпионы собачьих бегов.", "Они компактны, но быстры.", "Их шерсть почти не требует ухода."],
+    22: ["Ивисская борзая охотится на кроликов.", "Они грациозны и независимы.", "Им нужен активный хозяин."],
+    23: ["Норвежский элкхаунд охотится на лосей.", "Их шерсть защищает от холода.", "Они смелые и решительные."],
+    24: ["Оттерхаунд любит воду.", "Их нюх уникален для охоты.", "Они редки и необычны."],
+    25: ["Салюки — королевская собака Египта.", "Они быстрые и выносливые.", "Их шерсть проста в уходе."],
+    26: ["Шотландский дирхаунд силён и мощен.", "Они охотились на оленей.", "Им нужен просторный двор."],
+    27: ["Веймаранер имеет серебристую шерсть.", "Они универсальны на охоте.", "Их легко дрессировать."],
+    28: ["Стаффордширский бультерьер предан хозяину.", "Они сильны и мускулисты.", "Им нужна твёрдая рука."],
+    29: ["Американский стаффордшир любит семью.", "Они требуют активных прогулок.", "Их шерсть короткая и проста в уходе."],
+    30: ["Бедлингтон-терьер похож на ягнёнка.", "Они охотились на мелочь.", "Их шерсть требует стрижки."],
+    31: ["Бордер-терьер вынослив и дружелюбен.", "Они любят копать землю.", "Их шерсть жёсткая и прочная."],
+    32: ["Керри-блю-терьер имеет голубую шерсть.", "Они хороши как охотники.", "Их нужно регулярно стричь."],
+    33: ["Ирландский терьер смел и энергичен.", "Они любят активные игры.", "Их шерсть жёсткая и яркая."],
+    34: ["Норфолкский терьер мал, но храбр.", "Они дружелюбны к детям.", "Их шерсть требует ухода."],
+    35: ["Норвичский терьер отличается ушами.", "Они ловили крыс в Англии.", "Их легко содержать дома."],
+    36: ["Йоркширский терьер — декоративная порода.", "Их шерсть как человеческие волосы.", "Они любят внимание."],
+    37: ["Жесткошёрстный фокстерьер энергичен.", "Они охотились на лис.", "Их шерсть требует тримминга."],
+    38: ["Лейкленд-терьер из озёрного края.", "Они ловили вредителей.", "Их шерсть жёсткая и плотная."],
+    39: ["Силихем-терьер белый и пушистый.", "Они охотились на барсуков.", "Их шерсть требует ухода."],
+    40: ["Эрдельтерьер — король терьеров.", "Они универсальны и умны.", "Их шерсть жёсткая и кудрявая."],
+    41: ["Керн-терьер смел и независим.", "Они работали в камнях.", "Их шерсть защищает от грязи."],
+    42: ["Австралийский терьер борется с грызунами.", "Они энергичны и преданы.", "Их шерсть проста в уходе."],
+    43: ["Денди-динмонт имеет длинное тело.", "Они названы по герою книги.", "Их шерсть мягкая и густая."],
+    44: ["Бостонский терьер интеллигентен.", "Они отличные компаньоны.", "Их шерсть гладкая и короткая."],
+    45: ["Миниатюрный шнауцер бородат и умён.", "Они охраняли дома.", "Их шерсть требует стрижки."],
+    46: ["Гигантский шнауцер силён и вынослив.", "Они служат в полиции.", "Их шерсть жёсткая и плотная."],
+    47: ["Стандартный шнауцер среднего размера.", "Они охотились и охраняли.", "Их шерсть требует ухода."],
+    48: ["Шотландский терьер независим.", "Они известны как 'скотти'.", "Их шерсть жёсткая и короткая."],
+    49: ["Тибетский терьер — пастушья собака.", "Их шерсть длинная и густая.", "Они любят горы и простор."],
+    50: ["Шелковистый терьер из Австралии.", "Их шерсть мягкая и гладкая.", "Они отличные компаньоны."],
+    51: ["Мягкошёрстный пшеничный дружелюбен.", "Их шерсть мягкая и волнистая.", "Они любят играть с детьми."],
+    52: ["Вест-хайленд-уайт белый и милый.", "Они охотились в Шотландии.", "Их шерсть требует тримминга."],
+    53: ["Лхаса апсо охраняли монастыри.", "Их шерсть длинная и плотная.", "Они спокойны и независимы."],
+    54: ["Прямошёрстный ретривер предан.", "Они подносят дичь.", "Их шерсть гладкая и плотная."],
+    55: ["Кудрявошёрстный ретривер любит воду.", "Их шерсть кудрявая и густая.", "Они отличные пловцы."],
+    56: ["Золотистый ретривер дружелюбен.", "Они умны и обучаемы.", "Их шерсть требует расчёсывания."],
+    57: ["Лабрадор-ретривер универсален.", "Они служат поводырями.", "Их шерсть короткая и плотная."],
+    58: ["Чесапик-бей любит плавать.", "Они охотятся на уток.", "Их шерсть защищает от воды."],
+    59: ["Немецкий пойнтер энергичен.", "Они универсальны на охоте.", "Их шерсть короткая и гладкая."],
+    60: ["Венгерская выжла элегантна.", "Они преданы хозяину.", "Их шерсть короткая и блестящая."],
+    61: ["Английский сеттер грациозен.", "Они охотятся на птиц.", "Их шерсть длинная и шелковистая."],
+    62: ["Ирландский сеттер рыжий и активный.", "Они любят охоту.", "Их шерсть требует ухода."],
+    63: ["Гордон сеттер чёрно-подпалый.", "Они отличные охотники.", "Их шерсть длинная и густая."],
+    64: ["Бретонский спаниель компактен.", "Они энергичны на охоте.", "Их шерсть короткая и плотная."],
+    65: ["Кламбер-спаниель массивен.", "Они подносят дичь.", "Их шерсть густая и мягкая."],
+    66: ["Спрингер-спаниель активен.", "Они умны и послушны.", "Их шерсть требует расчёсывания."],
+    67: ["Вельш-спрингер красно-белый.", "Они охотятся в Уэльсе.", "Их шерсть плотная и гладкая."],
+    68: ["Кокер-спаниель популярен дома.", "Их уши длинные и мягкие.", "Они любят ласку хозяина."],
+    69: ["Суссекс-спаниель золотистый.", "Они медлительны, но упорны.", "Их шерсть требует ухода."],
+    70: ["Ирландский водяной любит воду.", "Их шерсть кудрявая и плотная.", "Они отличные пловцы."],
+    71: ["Кувас защищает стада.", "Их шерсть белая и густая.", "Они преданы своей семье."],
+    72: ["Шипперке охраняли баржи.", "Они маленькие, но смелые.", "Их шерсть чёрная и пушистая."],
+    73: ["Грюнендаль — чёрная овчарка.", "Они служат в полиции.", "Их шерсть длинная и густая."],
+    74: ["Малинуа умны и сильны.", "Они популярны в армии.", "Их шерсть короткая и плотная."],
+    75: ["Бриар предан и ласков.", "Их шерсть длинная и густая.", "Они отличные пастухи."],
+    76: ["Келпи работают с овцами.", "Они выносливы и быстры.", "Их шерсть короткая и гладкая."],
+    77: ["Комондор имеет шнуры шерсти.", "Они охраняют скот.", "Их шерсть требует особого ухода."],
+    78: ["Староанглийская овчарка пушиста.", "Они пасли овец в Англии.", "Их шерсть густая и длинная."],
+    79: ["Шетландская овчарка миниатюрна.", "Они умны и активны.", "Их шерсть требует расчёсывания."],
+    80: ["Колли знаменита длинной шерстью.", "Они интеллигентны.", "Их шерсть густая и мягкая."],
+    81: ["Бордер-колли — лучший пастух.", "Они очень умны.", "Их шерсть средней длины."],
+    82: ["Бувье де Фландр силён.", "Они работали на фермах.", "Их шерсть жёсткая и густая."],
+    83: ["Ротвейлер — надёжный охранник.", "Они преданы семье.", "Их шерсть короткая и гладкая."],
+    84: ["Немецкая овчарка универсальна.", "Они служат поводырями.", "Их шерсть средней длины."],
+    85: ["Доберман элегантен и смел.", "Они отличные охранники.", "Их шерсть короткая и блестящая."],
+    86: ["Миниатюрный пинчер мал, но храбр.", "Они энергичны и любопытны.", "Их шерсть гладкая и короткая."],
+    87: ["Швейцарский зенненхунд силён.", "Они работали в горах.", "Их шерсть густая и гладкая."],
+    88: ["Бернский зенненхунд трёхцветный.", "Они спокойны и добры.", "Их шерсть длинная и мягкая."],
+    89: ["Аппенцеллер активен и вынослив.", "Они пасли скот.", "Их шерсть короткая и плотная."],
+    90: ["Энтлебухер — маленький зенненхунд.", "Они энергичны и преданы.", "Их шерсть гладкая и короткая."],
+    91: ["Боксёр мускулист и дружелюбен.", "Они любят играть.", "Их шерсть короткая и гладкая."],
+    92: ["Бульмастиф мощный и спокойный.", "Они охраняли поместья.", "Их шерсть короткая и плотная."],
+    93: ["Тибетский мастиф охранял монастыри.", "Их шерсть густая и длинная.", "Они независимы и сильны."],
+    94: ["Французский бульдог компактный.", "Их морда требует ухода.", "Они любят спать и есть."],
+    95: ["Датский дог — нежный великан.", "Они дружелюбны к детям.", "Их шерсть короткая и гладкая."],
+    96: ["Сенбернар спасал людей в Альпах.", "Они массивны и добры.", "Их шерсть густая и длинная."],
+    97: ["Эскимосская собака тянет сани.", "Они выносливы в холоде.", "Их шерсть плотная и тёплая."],
+    98: ["Маламут силён и вынослив.", "Они любят тянуть грузы.", "Их шерсть густая и мягкая."],
+    99: ["Сибирский хаски имеет голубые глаза.", "Они быстрые и активные.", "Их шерсть требует ухода."],
+    100: ["Аффенпинчер похож на обезьянку.", "Они ловили крыс.", "Их шерсть жёсткая и короткая."],
+    101: ["Басенджи не лают, а воют.", "Они грациозны и умны.", "Их шерсть короткая и гладкая."],
+    102: ["Мопс любит поесть и поспать.", "Их морда требует чистки.", "Они весёлые и ласковые."],
+    103: ["Леонбергер — большая семейная собака.", "Они спокойны и добры.", "Их шерсть густая и длинная."],
+    104: ["Ньюфаундленд спасает на воде.", "Они добры и терпеливы.", "Их шерсть требует расчёсывания."],
+    105: ["Пиренейская собака охраняет скот.", "Они белые и мощные.", "Их шерсть густая и тёплая."],
+    106: ["Самоед всегда улыбается.", "Они пасли оленей.", "Их шерсть белая и пушистая."],
+    107: ["Померанский шпиц миниатюрен.", "Они любят внимание.", "Их шерсть требует ухода."],
+    108: ["Чау-чау имеет синий язык.", "Они древние охранники.", "Их шерсть густая и плотная."],
+    109: ["Кеесхонд охранял баржи.", "Их шерсть пушистая и тёплая.", "Они дружелюбны и активны."],
+    110: ["Брабантский гриффон бородат.", "Они ловили крыс.", "Их шерсть жёсткая и короткая."],
+    111: ["Пемброк-корги пасёт скот.", "Их лапы короткие и милые.", "Они умны и энергичны."],
+    112: ["Кардиган-корги старше пемброка.", "Они имеют длинный хвост.", "Их шерсть плотная и гладкая."],
+    113: ["Той-пудель умён и элегантен.", "Их шерсть кудрявая и мягкая.", "Они легко обучаемы."],
+    114: ["Миниатюрный пудель среднего размера.", "Они любят активность.", "Их шерсть требует стрижки."],
+    115: ["Стандартный пудель охотился на уток.", "Они умны и активны.", "Их шерсть густая и кудрявая."],
+    116: ["Мексиканская голая древняя порода.", "Их кожа требует ухода.", "Они любят тепло и уют."],
+    117: ["Динго — дикая собака Австралии.", "Они редко приручаются.", "Их шерсть короткая и жёсткая."],
+    118: ["Дхоле живут в стаях.", "Они имеют красный окрас.", "Они выносливы и быстры."],
+    119: ["Африканская собака охотится стаями.", "Их окрас пятнистый.", "Они редки и уникальны."]
+    },
+    "en": {
+    0: ["Chihuahuas are the smallest breed in the world.", "They need warm clothes in winter.", "They’re very loyal to their owner."],
+    1: ["Japanese Chins were gifts for emperors.", "Their coat needs daily grooming.", "They love sitting on high places."],
+    2: ["Maltese don’t shed, great for allergies.", "Their white coat needs frequent washing.", "They crave affection and attention."],
+    3: ["Pekingese were sacred in China.", "Their face needs special care.", "They prefer a calm lifestyle."],
+    4: ["Shih Tzus get along well with kids.", "Their coat needs regular trimming.", "They rarely show aggression."],
+    5: ["Blenheim Spaniels are named after a palace.", "They enjoy long walks.", "They’re good with cats."],
+    6: ["Papillons are very smart for their size.", "Their ears need regular cleaning.", "They love active games."],
+    7: ["Toy Terriers were rat catchers in England.", "They need a warm home in winter.", "They bond with one owner."],
+    8: ["Rhodesian Ridgebacks hunted lions.", "Their ridge is unique to each dog.", "They need strict training."],
+    9: ["Afghan Hounds are an ancient breed.", "Their coat needs professional care.", "They love running in open spaces."],
+    10: ["Basset Hounds have the best sense of smell.", "Their ears need regular cleaning.", "They love lounging at home."],
+    11: ["Beagles were hare hunters.", "They love digging holes.", "Their friendliness makes them great companions."],
+    12: ["Bloodhounds can track for days.", "Their skin needs care due to wrinkles.", "They’re calm and balanced."],
+    13: ["Bluetick Coonhounds have a melodious bark.", "They love forest hunting.", "Their coat is easy to clean."],
+    14: ["Black and Tan Coonhounds endure in woods.", "They work well in packs.", "They need lots of exercise."],
+    15: ["Treeing Walker Coonhounds are fast hunters.", "They love long walks.", "They need space to run."],
+    16: ["English Foxhounds endure on hunts.", "They’re friendly with people.", "Their voice is loud and clear."],
+    17: ["Redbone Coonhounds have a bright red coat.", "They’re great game hunters.", "They need an active life."],
+    18: ["Borzoi can catch wolves.", "They’re elegant and graceful.", "Their coat is short and easy to care for."],
+    19: ["Irish Wolfhounds are gentle giants.", "They’re good with kids.", "They need space to live."],
+    20: ["Italian Greyhounds are small and elegant.", "They love warmth and coziness.", "They’re easy to train."],
+    21: ["Whippets are dog racing champions.", "They’re compact yet fast.", "Their coat needs little care."],
+    22: ["Ibizan Hounds hunt rabbits.", "They’re graceful and independent.", "They need an active owner."],
+    23: ["Norwegian Elkhounds hunt elk.", "Their coat protects from cold.", "They’re brave and determined."],
+    24: ["Otterhounds love water.", "Their sense of smell is unique.", "They’re rare and unusual."],
+    25: ["Salukis are royal dogs of Egypt.", "They’re fast and enduring.", "Their coat is easy to maintain."],
+    26: ["Scottish Deerhounds are strong and powerful.", "They hunted deer.", "They need a spacious yard."],
+    27: ["Weimaraners have a silver coat.", "They’re versatile hunters.", "They’re easy to train."],
+    28: ["Staffordshire Bull Terriers are loyal.", "They’re strong and muscular.", "They need a firm hand."],
+    29: ["American Staffords love their family.", "They need active walks.", "Their coat is short and easy to care for."],
+    30: ["Bedlington Terriers look like lambs.", "They hunted small game.", "Their coat needs trimming."],
+    31: ["Border Terriers are enduring and friendly.", "They love digging dirt.", "Their coat is tough and wiry."],
+    32: ["Kerry Blue Terriers have a blue coat.", "They’re good hunters.", "They need regular grooming."],
+    33: ["Irish Terriers are brave and energetic.", "They love active play.", "Their coat is wiry and bright."],
+    34: ["Norfolk Terriers are small but bold.", "They’re friendly with kids.", "Their coat needs care."],
+    35: ["Norwich Terriers stand out with their ears.", "They caught rats in England.", "They’re easy to keep at home."],
+    36: ["Yorkshire Terriers are decorative.", "Their coat is like human hair.", "They love attention."],
+    37: ["Wire Fox Terriers are energetic.", "They hunted foxes.", "Their coat needs trimming."],
+    38: ["Lakeland Terriers are from the Lake District.", "They caught pests.", "Their coat is wiry and dense."],
+    39: ["Sealyham Terriers are white and fluffy.", "They hunted badgers.", "Their coat needs grooming."],
+    40: ["Airedale Terriers are the king of terriers.", "They’re versatile and smart.", "Their coat is wiry and curly."],
+    41: ["Cairn Terriers are bold and independent.", "They worked in rocky cairns.", "Their coat repels dirt."],
+    42: ["Australian Terriers fight rodents.", "They’re energetic and loyal.", "Their coat is easy to care for."],
+    43: ["Dandie Dinmonts have a long body.", "They’re named after a book character.", "Their coat is soft and thick."],
+    44: ["Boston Terriers are intelligent.", "They’re great companions.", "Their coat is smooth and short."],
+    45: ["Miniature Schnauzers are bearded and smart.", "They guarded homes.", "Their coat needs trimming."],
+    46: ["Giant Schnauzers are strong and enduring.", "They serve in police.", "Their coat is wiry and dense."],
+    47: ["Standard Schnauzers are medium-sized.", "They hunted and guarded.", "Their coat needs care."],
+    48: ["Scottish Terriers are independent.", "They’re known as 'Scotties.'", "Their coat is wiry and short."],
+    49: ["Tibetan Terriers are herding dogs.", "Their coat is long and thick.", "They love mountains and space."],
+    50: ["Silky Terriers are from Australia.", "Their coat is soft and smooth.", "They’re great companions."],
+    51: ["Soft Coated Wheatens are friendly.", "Their coat is soft and wavy.", "They love playing with kids."],
+    52: ["West Highland Whites are white and cute.", "They hunted in Scotland.", "Their coat needs trimming."],
+    53: ["Lhasa Apsos guarded monasteries.", "Their coat is long and dense.", "They’re calm and independent."],
+    54: ["Flat-Coated Retrievers are loyal.", "They retrieve game.", "Their coat is smooth and dense."],
+    55: ["Curly-Coated Retrievers love water.", "Their coat is curly and thick.", "They’re excellent swimmers."],
+    56: ["Golden Retrievers are friendly.", "They’re smart and trainable.", "Their coat needs brushing."],
+    57: ["Labrador Retrievers are versatile.", "They serve as guide dogs.", "Their coat is short and dense."],
+    58: ["Chesapeake Bays love swimming.", "They hunt ducks.", "Their coat protects from water."],
+    59: ["German Pointers are energetic.", "They’re versatile hunters.", "Their coat is short and smooth."],
+    60: ["Vizslas are elegant.", "They’re loyal to their owner.", "Their coat is short and shiny."],
+    61: ["English Setters are graceful.", "They hunt birds.", "Their coat is long and silky."],
+    62: ["Irish Setters are red and active.", "They love hunting.", "Their coat needs care."],
+    63: ["Gordon Setters are black and tan.", "They’re great hunters.", "Their coat is long and thick."],
+    64: ["Brittanys are compact.", "They’re energetic hunters.", "Their coat is short and dense."],
+    65: ["Clumber Spaniels are massive.", "They retrieve game.", "Their coat is thick and soft."],
+    66: ["Springer Spaniels are active.", "They’re smart and obedient.", "Their coat needs brushing."],
+    67: ["Welsh Springers are red and white.", "They hunt in Wales.", "Their coat is dense and smooth."],
+    68: ["Cocker Spaniels are popular at home.", "Their ears are long and soft.", "They love their owner’s affection."],
+    69: ["Sussex Spaniels are golden.", "They’re slow but persistent.", "Their coat needs care."],
+    70: ["Irish Water Spaniels love water.", "Their coat is curly and dense.", "They’re great swimmers."],
+    71: ["Kuvasz protect herds.", "Their coat is white and thick.", "They’re loyal to their family."],
+    72: ["Schipperkes guarded barges.", "They’re small but brave.", "Their coat is black and fluffy."],
+    73: ["Groenendaels are black shepherds.", "They serve in police.", "Their coat is long and thick."],
+    74: ["Malinois are smart and strong.", "They’re popular in the military.", "Their coat is short and dense."],
+    75: ["Briards are loyal and affectionate.", "Their coat is long and thick.", "They’re great herders."],
+    76: ["Kelpies work with sheep.", "They’re enduring and fast.", "Their coat is short and smooth."],
+    77: ["Komondors have corded fur.", "They guard livestock.", "Their coat needs special care."],
+    78: ["Old English Sheepdogs are fluffy.", "They herded sheep in England.", "Their coat is thick and long."],
+    79: ["Shetland Sheepdogs are miniature.", "They’re smart and active.", "Their coat needs brushing."],
+    80: ["Collies are famous for long coats.", "They’re intelligent.", "Their coat is thick and soft."],
+    81: ["Border Collies are top herders.", "They’re very smart.", "Their coat is medium-length."],
+    82: ["Bouvier des Flandres are strong.", "They worked on farms.", "Their coat is wiry and thick."],
+    83: ["Rottweilers are reliable guards.", "They’re loyal to family.", "Their coat is short and smooth."],
+    84: ["German Shepherds are versatile.", "They serve as guide dogs.", "Their coat is medium-length."],
+    85: ["Dobermans are elegant and brave.", "They’re great guards.", "Their coat is short and shiny."],
+    86: ["Miniature Pinschers are small but bold.", "They’re energetic and curious.", "Their coat is smooth and short."],
+    87: ["Greater Swiss are strong.", "They worked in mountains.", "Their coat is thick and smooth."],
+    88: ["Bernese Mountain Dogs are tricolored.", "They’re calm and kind.", "Their coat is long and soft."],
+    89: ["Appenzellers are active and enduring.", "They herded livestock.", "Their coat is short and dense."],
+    90: ["Entlebuchers are the smallest Sennenhund.", "They’re energetic and loyal.", "Their coat is smooth and short."],
+    91: ["Boxers are muscular and friendly.", "They love to play.", "Their coat is short and smooth."],
+    92: ["Bullmastiffs are powerful and calm.", "They guarded estates.", "Their coat is short and dense."],
+    93: ["Tibetan Mastiffs guarded monasteries.", "Their coat is thick and long.", "They’re independent and strong."],
+    94: ["French Bulldogs are compact.", "Their face needs cleaning.", "They love to sleep and eat."],
+    95: ["Great Danes are gentle giants.", "They’re friendly with kids.", "Their coat is short and smooth."],
+    96: ["Saint Bernards rescued in the Alps.", "They’re massive and kind.", "Their coat is thick and long."],
+    97: ["Canadian Eskimo Dogs pull sleds.", "They endure cold well.", "Their coat is dense and warm."],
+    98: ["Malamutes are strong and enduring.", "They love pulling loads.", "Their coat is thick and soft."],
+    99: ["Siberian Huskies have blue eyes.", "They’re fast and active.", "Their coat needs care."],
+    100: ["Affenpinschers look like monkeys.", "They caught rats.", "Their coat is wiry and short."],
+    101: ["Basenjis don’t bark, they yodel.", "They’re graceful and smart.", "Their coat is short and smooth."],
+    102: ["Pugs love to eat and sleep.", "Their face needs cleaning.", "They’re cheerful and affectionate."],
+    103: ["Leonbergers are big family dogs.", "They’re calm and kind.", "Their coat is thick and long."],
+    104: ["Newfoundlands rescue in water.", "They’re kind and patient.", "Their coat needs brushing."],
+    105: ["Great Pyrenees guard livestock.", "They’re white and powerful.", "Their coat is thick and warm."],
+    106: ["Samoyeds always smile.", "They herded reindeer.", "Their coat is white and fluffy."],
+    107: ["Pomeranians are miniature.", "They love attention.", "Their coat needs care."],
+    108: ["Chow Chows have blue tongues.", "They’re ancient guards.", "Their coat is thick and dense."],
+    109: ["Keeshonds guarded barges.", "Their coat is fluffy and warm.", "They’re friendly and active."],
+    110: ["Petit Brabançons are bearded.", "They caught rats.", "Their coat is wiry and short."],
+    111: ["Pembroke Corgis herd livestock.", "Their legs are short and cute.", "They’re smart and energetic."],
+    112: ["Cardigan Corgis are older than Pembrokes.", "They have long tails.", "Their coat is dense and smooth."],
+    113: ["Toy Poodles are smart and elegant.", "Their coat is curly and soft.", "They’re easy to train."],
+    114: ["Miniature Poodles are medium-sized.", "They love activity.", "Their coat needs trimming."],
+    115: ["Standard Poodles hunted ducks.", "They’re smart and active.", "Their coat is thick and curly."],
+    116: ["Mexican Hairless are ancient.", "Their skin needs care.", "They love warmth and coziness."],
+    117: ["Dingos are wild Australian dogs.", "They’re rarely tamed.", "Their coat is short and wiry."],
+    118: ["Dholes live in packs.", "They have a red coat.", "They’re enduring and fast."],
+    119: ["African Wild Dogs hunt in packs.", "Their coat is spotted.", "They’re rare and unique."]
+    }
+}
+
+# Переводы сообщений бота
+translations = {
+    "ru": {
+        "welcome": "Привет! Отправь мне фото собаки, и я определю топ-3 породы с небольшой справкой.",
+        "text_message": "Пожалуйста, отправь фото собаки для определения породы.",
+        "error": "Произошла ошибка: {error}",
+        "prediction_intro": "Я думаю, это может быть:\n\n",
+        "tip_label": "💡 ",
+        "lang_set": "Язык установлен на {lang}",
+        "lang_error": "Поддерживаемые языки: ru, en"
+    },
+    "en": {
+        "welcome": "Hi! Send me a dog photo, and I’ll identify the top 3 breeds with some info.",
+        "text_message": "Please send a dog photo to identify the breed.",
+        "error": "An error occurred: {error}",
+        "prediction_intro": "I think it might be:\n\n",
+        "tip_label": "💡 ",
+        "lang_set": "Language set to {lang}",
+        "lang_error": "Supported languages: ru, en"
+    }
+}
+
+
+# Функция предсказания породы
+async def predict_breed(img_path, lang="ru"):
     logger.info(f"Обработка изображения: {img_path}")
     try:
         img = tf.keras.preprocessing.image.load_img(img_path, target_size=(img_height, img_width))
-        logger.debug("Изображение успешно загружено и изменено до нужного размера")
         img_array = tf.keras.preprocessing.image.img_to_array(img)
         img_array = np.expand_dims(img_array, axis=0)
         img_array /= 255.0
-        logger.debug("Изображение преобразовано в массив и нормализовано")
         prediction = model.predict(img_array)
-        top_3_indices = np.argpartition(prediction[0], -3)[-3:]  # Топ-3 индекса
+        top_3_indices = np.argpartition(prediction[0], -3)[-3:]
         top_3_confidences = prediction[0][top_3_indices] * 100
-        sorted_indices = top_3_indices[np.argsort(-top_3_confidences)]  # Сортировка по убыванию
+        sorted_indices = top_3_indices[np.argsort(-top_3_confidences)]
         sorted_confidences = np.sort(top_3_confidences)[::-1]
         
-        result = "Я думаю, это может быть:\n\n"
+        tr = translations[lang]
+        result = f"✨ {tr['prediction_intro']} ✨\n\n"
         for i, (idx, conf) in enumerate(zip(sorted_indices, sorted_confidences)):
-            breed_name, breed_info = class_indices[idx]
-            result += f"{i+1}. {breed_name} (уверенность: {conf:.2f}%)\n{breed_info}\n\n"
-        logger.info(f"Предсказание: {result.splitlines()[0]}")
+            breed_name, breed_info = class_indices[lang][idx]
+            tip = random.choice(breed_tips[lang][idx])
+            result += (
+                f"🐾 **{i+1}. {breed_name}** (Уверенность: *{conf:.2f}%*)\n"
+                f"{breed_info}\n"
+                f"{tr['tip_label']}_{tip}_\n\n"
+            )
+        result += "🐕 Надеюсь, тебе понравился результат! Отправь ещё фото, если хочешь! 🐕"
         return result.strip()
     except Exception as e:
         logger.error(f"Ошибка в predict_breed: {str(e)}")
@@ -186,39 +572,46 @@ async def predict_breed(img_path):
 
 @dp.message(Command("start"))
 async def start_command(message: types.Message):
-    logger.info(f"Получена команда /start от пользователя {message.from_user.id}")
-    await message.answer("Привет! Отправь мне фото собаки, и я определю топ-3 возможных породы с небольшой справкой.")
+    lang = user_lang.get(message.from_user.id, "ru")
+    await message.answer(translations[lang]["welcome"])
+
+@dp.message(Command("lang"))
+async def set_language(message: types.Message):
+    try:
+        lang = message.text.split()[1].lower()
+        if lang in ["ru", "en"]:
+            user_lang[message.from_user.id] = lang
+            await message.answer(translations[lang]["lang_set"].format(lang=lang.upper()))
+        else:
+            await message.answer(translations[lang]["lang_error"])
+    except IndexError:
+        lang = user_lang.get(message.from_user.id, "ru")
+        await message.answer(translations[lang]["lang_error"])
 
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
-    logger.info(f"Получено фото от пользователя {message.from_user.id}")
+    lang = user_lang.get(message.from_user.id, "ru")
     try:
         photo = message.photo[-1]
         file_path = f"temp_{message.message_id}.jpg"
-        logger.debug(f"Сохранение фото в {file_path}")
         await bot.download(photo, destination=file_path)
-        logger.info(f"Фото успешно сохранено как {file_path}")
-        predicted_breeds = await predict_breed(file_path)
-        await message.answer(predicted_breeds)
-        logger.info(f"Ответ отправлен пользователю: {predicted_breeds.splitlines()[0]}")
+        predicted_breeds = await predict_breed(file_path, lang)
+        # Указываем parse_mode="Markdown" для поддержки форматирования
+        await message.answer(predicted_breeds, parse_mode="Markdown")
         os.remove(file_path)
-        logger.debug(f"Временный файл {file_path} удалён")
     except Exception as e:
-        error_msg = f"Произошла ошибка: {str(e)}\nТип ошибки: {type(e).__name__}"
-        logger.error(error_msg)
+        error_msg = translations[lang]["error"].format(error=str(e))
         await message.answer(error_msg)
 
 @dp.message()
 async def handle_text(message: types.Message):
-    logger.info(f"Получено текстовое сообщение от пользователя {message.from_user.id}: {message.text}")
-    await message.answer("Пожалуйста, отправь фото собаки для определения породы.")
+    lang = user_lang.get(message.from_user.id, "ru")
+    await message.answer(translations[lang]["text_message"])
 
 async def main():
     logger.info("Запуск бота...")
     await dp.start_polling(bot)
-    logger.info("Бот остановлен")
 
 if __name__ == "__main__":
     import asyncio
-    logger.info("Старт программы")
     asyncio.run(main())
